@@ -1701,6 +1701,7 @@ impl<
         let (_, n) = iter.size_hint();
         let leafs = n.ok_or_else(|| anyhow!("could not get size hint from iterator"))?;
         let branches = BaseTreeArity::to_usize();
+
         ensure!(leafs > 1, "not enough leaves");
         ensure!(next_pow2(leafs) == leafs, "size MUST be a power of 2");
         ensure!(
@@ -1710,6 +1711,8 @@ impl<
 
         let size = get_merkle_tree_len(leafs, branches)?;
         let row_count = get_merkle_tree_row_count(leafs, branches);
+
+        debug!("********MerkleTree try_from_iter:branches {}, leafs {}, size {} row_count {}", branches, leafs, size, row_count);
 
         let mut data = S::new(size).context("failed to create data store")?;
         populate_data::<E, A, S, BaseTreeArity, I>(&mut data, iter)
