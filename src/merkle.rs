@@ -1895,11 +1895,13 @@ pub fn is_merkle_tree_size_valid(leafs: usize, branches: usize) -> bool {
 // Row_Count calculation given the number of leafs in the tree and the branches.
 pub fn get_merkle_tree_row_count(leafs: usize, branches: usize) -> usize {
     // Optimization
-    if branches == 2 {
+    let r = if branches == 2 {
         (leafs * branches).trailing_zeros() as usize
     } else {
         (branches as f64 * leafs as f64).log(branches as f64) as usize
-    }
+    };
+    debug!("get_merkle_tree_row_coun, leafs {}, branches {}, row {}", leafs, branches, r);
+    r
 }
 
 // Given a tree of 'row_count' with the specified number of 'branches',
