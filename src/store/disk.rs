@@ -524,6 +524,9 @@ impl<E: Element> Store<E> for DiskStore<E> {
         // The root isn't part of the previous loop so `row_count` is
         // missing one level.
 
+        // sync
+        self.sync()?;
+
         // Return the root
         self.last()
     }
