@@ -508,6 +508,8 @@ impl<E: Element> Store<E> for DiskStore<E> {
             // since we know the backing file was updated outside of
             // the store interface.
             self.set_len(Store::len(self) + width);
+            self.copy_from_slice(&bufb[0..(width >> shift)* E::byte_len()], write_start * E::byte_len())?;
+
             // swap buf1 buf2
             std::mem::swap(&mut bufa, &mut bufb);
         }
@@ -532,7 +534,7 @@ impl<E: Element> Store<E> for DiskStore<E> {
         width: usize,
         level: usize,
         _read_start: usize,
-        write_start: usize,
+        _write_start: usize,
         buf1: &mut [u8],
         buf2: &mut [u8]
     ) -> Result<()> {
@@ -606,8 +608,6 @@ impl<E: Element> Store<E> for DiskStore<E> {
             let offset = (i >> shift) * item_size;
             buf2[offset..offset+item_size].copy_from_slice(h.as_ref());
         }
-
-        self.copy_from_slice(&buf2[0..(width >> shift)* E::byte_len()], write_start * E::byte_len())?;
 
         Ok(())
     }
