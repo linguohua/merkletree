@@ -1708,8 +1708,10 @@ impl<
         let mut data = S::new_with_config(size, branches, config.clone())
             .context("failed to create data store")?;
 
+        // buf1 must contains the hash
         populate_data_par2::<E, A, S, BaseTreeArity>(&mut data, size, buf1, buf2)?;
-        let root = S::build::<A, BaseTreeArity>(&mut data, leafs, row_count, Some(config))?;
+        // buf2 contains 64GB leafs
+        let root = S::build2::<A, BaseTreeArity>(&mut data, leafs, row_count, Some(config), buf2, buf1)?;
 
         Ok(MerkleTree {
             data: Data::BaseTree(data),
@@ -2090,7 +2092,7 @@ where
         return Ok(());
     }
 
-    //let store = Arc::new(RwLock::new(data));
+    let store = Arc::new(RwLock::new(data));
     let item_size = E::byte_len();
     let mut a = A::default();
     for i in 0..size {
@@ -2117,8 +2119,11 @@ where
     //         //     .unwrap()
     //         //     .copy_from_slice(&buf[..], BUILD_DATA_BLOCK_SIZE * index)
     //     })?;
-
-    //store.write().unwrap().sync()?;
+    store
+        .write()
+        .unwrap()
+        .copy_from_slice(&buf2[..], 0)?;
+    store.write().unwrap().sync()?;
     Ok(())
 }
 
