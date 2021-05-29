@@ -1571,6 +1571,10 @@ where
         I: IntoParallelIterator<Item = E>,
         I::Iter: IndexedParallelIterator,
         BaseTreeArity: Unsigned;
+
+    fn from_par_iter_with_config2(size: usize, config: StoreConfig, buf1: &mut [u8], buf2:&mut [u8]) -> Result<Self>
+    where
+        BaseTreeArity: Unsigned;
 }
 
 impl<
@@ -1666,6 +1670,45 @@ impl<
         }
 
         populate_data_par::<E, A, S, BaseTreeArity, _>(&mut data, iter)?;
+        let root = S::build::<A, BaseTreeArity>(&mut data, leafs, row_count, Some(config))?;
+
+        Ok(MerkleTree {
+            data: Data::BaseTree(data),
+            leafs,
+            len: size,
+            row_count,
+            root,
+            _a: PhantomData,
+            _e: PhantomData,
+            _bta: PhantomData,
+            _sta: PhantomData,
+            _tta: PhantomData,
+        })
+    }
+
+    fn from_par_iter_with_config2(size: usize, config: StoreConfig, buf1:&mut [u8], buf2:&mut [u8]) -> Result<Self>
+    where
+        BaseTreeArity: Unsigned,
+    {
+        //let iter = into.into_par_iter();
+
+        //let leafs = iter.opt_len().expect("must be sized");
+        let leafs = size;
+        let branches = BaseTreeArity::to_usize();
+        ensure!(leafs > 1, "not enough leaves");
+        ensure!(next_pow2(leafs) == leafs, "size MUST be a power of 2");
+        ensure!(
+            next_pow2(branches) == branches,
+            "branches MUST be a power of 2"
+        );
+
+        let size = get_merkle_tree_len(leafs, branches)?;
+        let row_count = get_merkle_tree_row_count(leafs, branches);
+
+        let mut data = S::new_with_config(size, branches, config.clone())
+            .context("failed to create data store")?;
+
+        populate_data_par2::<E, A, S, BaseTreeArity>(&mut data, size, buf1, buf2)?;
         let root = S::build::<A, BaseTreeArity>(&mut data, leafs, row_count, Some(config))?;
 
         Ok(MerkleTree {
@@ -2033,6 +2076,49 @@ where
         })?;
 
     store.write().unwrap().sync()?;
+    Ok(())
+}
+
+fn populate_data_par2<E, A, S, BaseTreeArity>(data: &mut S, size: usize, buf1: &mut [u8], buf2:&mut [u8]) -> Result<()>
+where
+    E: Element,
+    A: Algorithm<E>,
+    S: Store<E>,
+    BaseTreeArity: Unsigned,
+{
+    if !data.is_empty() {
+        return Ok(());
+    }
+
+    //let store = Arc::new(RwLock::new(data));
+    let item_size = E::byte_len();
+    let mut a = A::default();
+    for i in 0..size {
+        let offset = i* item_size;
+        let item_buf = &buf1[offset..offset+item_size];
+        let e = E::from_slice(&item_buf);
+
+        a.reset();
+        buf2[offset..offset+item_size].copy_from_slice(a.leaf(e).as_ref());
+    }
+
+    // iter.chunks(BUILD_DATA_BLOCK_SIZE)
+    //     .enumerate()
+    //     .try_for_each(|(index, chunk)| {
+
+    //         let mut buf = Vec::with_capacity(BUILD_DATA_BLOCK_SIZE * E::byte_len());
+
+    //         for item in chunk {
+    //             a.reset();
+    //             buf.extend(a.leaf(item).as_ref());
+    //         }
+    //         // store
+    //         //     .write()
+    //         //     .unwrap()
+    //         //     .copy_from_slice(&buf[..], BUILD_DATA_BLOCK_SIZE * index)
+    //     })?;
+
+    //store.write().unwrap().sync()?;
     Ok(())
 }
 
