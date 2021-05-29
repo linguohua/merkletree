@@ -463,8 +463,8 @@ impl<E: Element> Store<E> for DiskStore<E> {
         leafs: usize,
         row_count: usize,
         _config: Option<StoreConfig>,
-        mut buf1: &mut [u8],
-        mut buf2: &mut [u8],
+        buf1: &mut [u8],
+        buf2: &mut [u8],
     ) -> Result<E> {
         let branches = U::to_usize();
         ensure!(
@@ -531,7 +531,7 @@ impl<E: Element> Store<E> for DiskStore<E> {
         &mut self,
         width: usize,
         level: usize,
-        read_start: usize,
+        _read_start: usize,
         write_start: usize,
         buf1: &mut [u8],
         buf2: &mut [u8]
@@ -596,14 +596,14 @@ impl<E: Element> Store<E> for DiskStore<E> {
             let mut nodes = Vec::with_capacity(branches);
             for j in 0..branches {
                 // read node
-                let offset = i * item_size;
+                let offset = (i + j) * item_size;
                 let e = E::from_slice(&buf1[offset..offset+item_size]);
                 nodes.push(e);
             }
 
             let h = A::default().multi_node(&nodes[..], level);
 
-            let offset = i * item_size;
+            let offset = (i >> shift) * item_size;
             buf2[offset..offset+item_size].copy_from_slice(h.as_ref());
         }
 

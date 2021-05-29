@@ -1709,7 +1709,7 @@ impl<
             .context("failed to create data store")?;
 
         // buf1 must contains the hash
-        populate_data_par2::<E, A, S, BaseTreeArity>(&mut data, size, buf1, buf2)?;
+        populate_data_par2::<E, A, S, BaseTreeArity>(&mut data, leafs, buf1, buf2)?;
         // buf2 contains 64GB leafs
         let root = S::build2::<A, BaseTreeArity>(&mut data, leafs, row_count, Some(config), buf2, buf1)?;
 
