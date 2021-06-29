@@ -1571,6 +1571,12 @@ where
         I: IntoParallelIterator<Item = E>,
         I::Iter: IndexedParallelIterator,
         BaseTreeArity: Unsigned;
+
+    fn from_par_iter_with_config2(size: usize, config: StoreConfig, buf1: &mut [u8], buf2:&mut [u8]) -> Result<Self>
+    where
+        BaseTreeArity: Unsigned;
+
+    fn load_with_config(size: usize, config: StoreConfig)-> Result<Self>;
 }
 
 impl<
@@ -1681,6 +1687,84 @@ impl<
             _tta: PhantomData,
         })
     }
+
+    fn load_with_config(leafs: usize, config: StoreConfig)-> Result<Self> {
+        let branches = BaseTreeArity::to_usize();
+        ensure!(leafs > 1, "not enough leaves");
+        ensure!(next_pow2(leafs) == leafs, "size MUST be a power of 2");
+        ensure!(
+            next_pow2(branches) == branches,
+            "branches MUST be a power of 2"
+        );
+
+        let size = get_merkle_tree_len(leafs, branches)?;
+        let row_count = get_merkle_tree_row_count(leafs, branches);
+
+        let data = S::new_with_config(size, branches, config.clone())
+            .context("failed to create data store")?;
+
+        // If the data store was loaded from disk, we know we have
+        // access to the full merkle tree.
+        if data.loaded_from_disk() {
+            let root = data.last().context("failed to read root")?;
+
+            return Ok(MerkleTree {
+                data: Data::BaseTree(data),
+                leafs,
+                len: size,
+                row_count,
+                root,
+                _a: PhantomData,
+                _e: PhantomData,
+                _bta: PhantomData,
+                _sta: PhantomData,
+                _tta: PhantomData,
+            });
+        } else {
+            return Err(anyhow!("can't load merkle from disk"));
+        }
+    }
+
+    fn from_par_iter_with_config2(size: usize, config: StoreConfig, buf1:&mut [u8], buf2:&mut [u8]) -> Result<Self>
+    where
+        BaseTreeArity: Unsigned,
+    {
+        //let iter = into.into_par_iter();
+
+        //let leafs = iter.opt_len().expect("must be sized");
+        let leafs = size;
+        let branches = BaseTreeArity::to_usize();
+        ensure!(leafs > 1, "not enough leaves");
+        ensure!(next_pow2(leafs) == leafs, "size MUST be a power of 2");
+        ensure!(
+            next_pow2(branches) == branches,
+            "branches MUST be a power of 2"
+        );
+
+        let size = get_merkle_tree_len(leafs, branches)?;
+        let row_count = get_merkle_tree_row_count(leafs, branches);
+
+        let mut data = S::new_with_config(size, branches, config.clone())
+            .context("failed to create data store")?;
+
+        // buf1 must contains the hash
+        populate_data_par2::<E, A, S, BaseTreeArity>(&mut data, leafs, buf1, buf2)?;
+        // buf2 contains 64GB leafs
+        let root = S::build2::<A, BaseTreeArity>(&mut data, leafs, row_count, Some(config), buf2, buf1)?;
+
+        Ok(MerkleTree {
+            data: Data::BaseTree(data),
+            leafs,
+            len: size,
+            row_count,
+            root,
+            _a: PhantomData,
+            _e: PhantomData,
+            _bta: PhantomData,
+            _sta: PhantomData,
+            _tta: PhantomData,
+        })
+    }
 }
 
 impl<
@@ -1701,6 +1785,7 @@ impl<
         let (_, n) = iter.size_hint();
         let leafs = n.ok_or_else(|| anyhow!("could not get size hint from iterator"))?;
         let branches = BaseTreeArity::to_usize();
+
         ensure!(leafs > 1, "not enough leaves");
         ensure!(next_pow2(leafs) == leafs, "size MUST be a power of 2");
         ensure!(
@@ -1710,6 +1795,8 @@ impl<
 
         let size = get_merkle_tree_len(leafs, branches)?;
         let row_count = get_merkle_tree_row_count(leafs, branches);
+
+        debug!("********MerkleTree try_from_iter:branches {}, leafs {}, size {} row_count {}", branches, leafs, size, row_count);
 
         let mut data = S::new(size).context("failed to create data store")?;
         populate_data::<E, A, S, BaseTreeArity, I>(&mut data, iter)
@@ -1892,11 +1979,13 @@ pub fn is_merkle_tree_size_valid(leafs: usize, branches: usize) -> bool {
 // Row_Count calculation given the number of leafs in the tree and the branches.
 pub fn get_merkle_tree_row_count(leafs: usize, branches: usize) -> usize {
     // Optimization
-    if branches == 2 {
+    let r = if branches == 2 {
         (leafs * branches).trailing_zeros() as usize
     } else {
         (branches as f64 * leafs as f64).log(branches as f64) as usize
-    }
+    };
+    // debug!("get_merkle_tree_row_count, leafs {}, branches {}, row {}", leafs, branches, r);
+    r
 }
 
 // Given a tree of 'row_count' with the specified number of 'branches',
@@ -2027,6 +2116,52 @@ where
                 .copy_from_slice(&buf[..], BUILD_DATA_BLOCK_SIZE * index)
         })?;
 
+    store.write().unwrap().sync()?;
+    Ok(())
+}
+
+fn populate_data_par2<E, A, S, BaseTreeArity>(data: &mut S, size: usize, buf1: &mut [u8], buf2:&mut [u8]) -> Result<()>
+where
+    E: Element,
+    A: Algorithm<E>,
+    S: Store<E>,
+    BaseTreeArity: Unsigned,
+{
+    if !data.is_empty() {
+        return Ok(());
+    }
+
+    let store = Arc::new(RwLock::new(data));
+    let item_size = E::byte_len();
+    let mut a = A::default();
+    for i in 0..size {
+        let offset = i* item_size;
+        let item_buf = &buf1[offset..offset+item_size];
+        let e = E::from_slice(&item_buf);
+
+        a.reset();
+        buf2[offset..offset+item_size].copy_from_slice(a.leaf(e).as_ref());
+    }
+
+    // iter.chunks(BUILD_DATA_BLOCK_SIZE)
+    //     .enumerate()
+    //     .try_for_each(|(index, chunk)| {
+
+    //         let mut buf = Vec::with_capacity(BUILD_DATA_BLOCK_SIZE * E::byte_len());
+
+    //         for item in chunk {
+    //             a.reset();
+    //             buf.extend(a.leaf(item).as_ref());
+    //         }
+    //         // store
+    //         //     .write()
+    //         //     .unwrap()
+    //         //     .copy_from_slice(&buf[..], BUILD_DATA_BLOCK_SIZE * index)
+    //     })?;
+    store
+        .write()
+        .unwrap()
+        .copy_from_slice(&buf2[..], 0)?;
     store.write().unwrap().sync()?;
     Ok(())
 }
