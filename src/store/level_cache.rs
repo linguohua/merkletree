@@ -80,7 +80,9 @@ impl<E: Element, R: Read + Send + Sync> LevelCacheStore<E, R> {
     ) -> Result<Self> {
         let data_path = StoreConfig::data_path(&config.path, &config.id);
 
-        let file = OpenOptions::new().write(true).read(true).open(data_path)?;
+        let file = OpenOptions::new().write(true).read(true).open(&data_path).with_context(||
+            format!("new_from_disk_with_reader Failed to open file {} with read/write permission", data_path.display()))?;
+
         let metadata = file.metadata()?;
         let store_size = metadata.len() as usize;
 
@@ -152,7 +154,7 @@ impl<E: Element, R: Read + Send + Sync> Store<E> for LevelCacheStore<E, R> {
             .write(true)
             .read(true)
             .create_new(true)
-            .open(data_path)?;
+            .open(&data_path).with_context(|| format!("new_with_config Failed to open file {} with read/write/create permission", data_path.display()))?;
 
         let store_size = E::byte_len() * size;
         let leafs = get_merkle_tree_leafs(size, branches)?;
@@ -168,7 +170,7 @@ impl<E: Element, R: Read + Send + Sync> Store<E> for LevelCacheStore<E, R> {
             get_merkle_tree_cache_size(leafs, branches, config.rows_to_discard)? * E::byte_len();
         let cache_index_start = store_size - cache_size;
 
-        file.set_len(store_size as u64)?;
+        file.set_len(store_size as u64).with_context(|| format!("new_with_config Failed to call set_len for file {}", data_path.display()))?;
 
         Ok(LevelCacheStore {
             len: 0,
@@ -245,8 +247,10 @@ impl<E: Element, R: Read + Send + Sync> Store<E> for LevelCacheStore<E, R> {
     fn new_from_disk(store_range: usize, branches: usize, config: &StoreConfig) -> Result<Self> {
         let data_path = StoreConfig::data_path(&config.path, &config.id);
 
-        let file = OpenOptions::new().write(true).read(true).open(data_path)?;
-        let metadata = file.metadata()?;
+        let file = OpenOptions::new().write(true).read(true).open(&data_path).with_context(||
+            format!("new_from_disk Failed to open file {} with read/write permission", data_path.display()))?;
+
+        let metadata = file.metadata().with_context(|| format!("new_from_disk Failed to get file metadata {}", data_path.display()))?;
         let store_size = metadata.len() as usize;
 
         // The LevelCacheStore base data layer must already be a
