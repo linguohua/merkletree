@@ -76,7 +76,7 @@ pub const BUILD_DATA_BLOCK_SIZE: usize = 64 * BUILD_CHUNK_NODES;
 /// tree).
 
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct IOFileReadStat {
     pub file_tag: String,
     pub read_count: usize,
@@ -92,6 +92,12 @@ impl IOFileReadStat {
             read_size: 0,
             read_time: std::time::Duration::new(0, 0),
         }
+    }
+
+    pub fn merge(&mut self, other: &IOFileReadStat) {
+        self.read_count = self.read_count + other.read_count;
+        self.read_size = self.read_size + other.read_size;
+        self.read_time = self.read_time + other.read_time;
     }
 }
 
@@ -1201,12 +1207,27 @@ impl<
                 // initialize a VecStore to back a new, smaller MT.
                 let mut data_copy = vec![0; segment_width * E::byte_len()];
                 ensure!(self.data.store().is_some(), "store data required");
+                use std::time::Instant;
+                let instant = Instant::now();
 
                 self.data.store().unwrap().read_range_into(
                     segment_start,
                     segment_end,
                     &mut data_copy,
                 )?;
+
+                let mut next_iostat = None;
+                if iostat.is_some() {
+                    let is = iostat.unwrap();
+                    is.data_file_stat.read_count += 1;
+                    is.data_file_stat.read_size += data_copy.len();
+
+                    let e = instant.elapsed();
+                    is.data_file_stat.read_time += e;
+
+                    next_iostat = Some(is);
+                }
+
                 let partial_store = VecStore::new_from_slice(segment_width, &data_copy)?;
                 ensure!(
                     Store::len(&partial_store) == segment_width,
@@ -1230,7 +1251,7 @@ impl<
 
                 // Generate entire proof with access to the base data, the
                 // cached data, and the partial tree.
-                let proof = self.gen_proof_with_partial_tree(i, rows_to_discard, &partial_tree)?;
+                let proof = self.gen_proof_with_partial_tree(i, rows_to_discard, &partial_tree, next_iostat)?;
 
                 debug!(
                     "generated partial_tree of row_count {} and len {} with {} branches for proof at {}",
@@ -1252,6 +1273,7 @@ impl<
         i: usize,
         rows_to_discard: usize,
         partial_tree: &MerkleTree<E, A, VecStore<E>, BaseTreeArity>,
+        iostat: Option<&mut IOReadStat>,
     ) -> Result<Proof<E, BaseTreeArity>> {
         ensure!(
             i < self.leafs,
@@ -1326,7 +1348,16 @@ impl<
             "Data slice must not have a top layer"
         );
 
+        use std::time::Instant;
+        let instant = Instant::now();
+        let mut data_read_count = 0;
+        let mut data_read_time = std::time::Duration::ZERO;
+        let mut cache_read_count = 0;
+        let mut cache_read_time = std::time::Duration::ZERO;
         lemma.push(self.read_at(j)?);
+        let e = instant.elapsed();
+        data_read_time += e;
+
         while base + 1 < self.len() {
             let hash_index = (j / branches) * branches;
             for k in hash_index..hash_index + branches {
@@ -1334,7 +1365,18 @@ impl<
                     let read_index = base + k;
                     lemma.push(
                         if read_index < data_width || read_index >= cache_index_start {
-                            self.read_at(base + k)?
+                            let instant = Instant::now();
+                            let result = self.read_at(base + k)?;
+                            let e = instant.elapsed();
+                            if read_index < data_width {
+                                data_read_count += 1;
+                                data_read_time += e;
+                            } else {
+                                cache_read_count += 1;
+                                cache_read_time += e;
+                            }
+
+                            result
                         } else {
                             let read_index = partial_base + k - segment_shift;
                             partial_tree.read_at(read_index)?
@@ -1354,6 +1396,17 @@ impl<
             segment_shift >>= shift; // segment_shift /= branches
 
             j >>= shift; // j /= branches;
+        }
+
+        if iostat.is_some() {
+            let is = iostat.unwrap();
+            is.data_file_stat.read_count += data_read_count;
+            is.data_file_stat.read_size += data_read_count*E::byte_len();
+            is.data_file_stat.read_time += data_read_time;
+
+            is.cache_file_stat.read_count += cache_read_count;
+            is.cache_file_stat.read_size += cache_read_count*E::byte_len();
+            is.cache_file_stat.read_time += cache_read_time;
         }
 
         // root is final
