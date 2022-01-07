@@ -75,6 +75,41 @@ pub const BUILD_DATA_BLOCK_SIZE: usize = 64 * BUILD_CHUNK_NODES;
 /// layer merkle tree without layers (i.e. a conventional merkle
 /// tree).
 
+
+#[derive(Debug)]
+pub struct IOFileReadStat {
+    pub file_tag: String,
+    pub read_count: usize,
+    pub read_size: usize,
+    pub read_time: std::time::Duration,
+}
+
+impl IOFileReadStat {
+    pub fn new(file_tag: &str) -> Self {
+        IOFileReadStat {
+            file_tag: file_tag.to_string(),
+            read_count: 0,
+            read_size: 0,
+            read_time: std::time::Duration::new(0, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct IOReadStat {
+    pub cache_file_stat: IOFileReadStat,
+    pub data_file_stat: IOFileReadStat,
+}
+
+impl IOReadStat {
+    pub fn new(data_file_tag:&str, cache_file_tag:&str) -> Self {
+        IOReadStat {
+            cache_file_stat: IOFileReadStat::new(cache_file_tag),
+            data_file_stat: IOFileReadStat::new(data_file_tag),
+        }
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 #[allow(clippy::enum_variant_names)]
 enum Data<E: Element, A: Algorithm<E>, S: Store<E>, BaseTreeArity: Unsigned, SubTreeArity: Unsigned>
@@ -995,6 +1030,7 @@ impl<
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
+        iostat: &mut IOReadStat,
     ) -> Result<Proof<E, BaseTreeArity>> {
         ensure!(Arity::to_usize() != 0, "Invalid top-tree arity");
         ensure!(
@@ -1016,7 +1052,7 @@ impl<
 
         // Generate the proof that will validate to the provided
         // sub-tree root (note the branching factor of B).
-        let sub_tree_proof = tree.gen_cached_proof(leaf_index, rows_to_discard)?;
+        let sub_tree_proof = tree.gen_cached_proof(leaf_index, rows_to_discard, iostat)?;
 
         // Construct the top layer proof.  'lemma' length is
         // top_layer_nodes - 1 + root == top_layer_nodes
@@ -1043,6 +1079,7 @@ impl<
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
+        iostat: &mut IOReadStat
     ) -> Result<Proof<E, BaseTreeArity>> {
         ensure!(Arity::to_usize() != 0, "Invalid sub-tree arity");
         ensure!(
@@ -1064,7 +1101,7 @@ impl<
 
         // Generate the proof that will validate to the provided
         // sub-tree root (note the branching factor of B).
-        let sub_tree_proof = tree.gen_cached_proof(leaf_index, rows_to_discard)?;
+        let sub_tree_proof = tree.gen_cached_proof(leaf_index, rows_to_discard, iostat)?;
 
         // Construct the top layer proof.  'lemma' length is
         // top_layer_nodes - 1 + root == top_layer_nodes
@@ -1098,10 +1135,11 @@ impl<
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
+        iostat: &mut IOReadStat,
     ) -> Result<Proof<E, BaseTreeArity>> {
         match &self.data {
-            Data::TopTree(_) => self.gen_cached_top_tree_proof::<TopTreeArity>(i, rows_to_discard),
-            Data::SubTree(_) => self.gen_cached_sub_tree_proof::<SubTreeArity>(i, rows_to_discard),
+            Data::TopTree(_) => self.gen_cached_top_tree_proof::<TopTreeArity>(i, rows_to_discard, iostat),
+            Data::SubTree(_) => self.gen_cached_sub_tree_proof::<SubTreeArity>(i, rows_to_discard, iostat),
             Data::BaseTree(_) => {
                 ensure!(
                     i < self.leafs,
