@@ -1030,7 +1030,7 @@ impl<
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
-        iostat: &mut IOReadStat,
+        iostat: Option<&mut IOReadStat>,
     ) -> Result<Proof<E, BaseTreeArity>> {
         ensure!(Arity::to_usize() != 0, "Invalid top-tree arity");
         ensure!(
@@ -1079,7 +1079,7 @@ impl<
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
-        iostat: &mut IOReadStat
+        iostat: Option<&mut IOReadStat>,
     ) -> Result<Proof<E, BaseTreeArity>> {
         ensure!(Arity::to_usize() != 0, "Invalid sub-tree arity");
         ensure!(
@@ -1135,7 +1135,7 @@ impl<
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
-        iostat: &mut IOReadStat,
+        iostat: Option<&mut IOReadStat>,
     ) -> Result<Proof<E, BaseTreeArity>> {
         match &self.data {
             Data::TopTree(_) => self.gen_cached_top_tree_proof::<TopTreeArity>(i, rows_to_discard, iostat),
