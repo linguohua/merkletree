@@ -1356,6 +1356,7 @@ impl<
         let mut cache_read_time = std::time::Duration::ZERO;
         lemma.push(self.read_at(j)?);
         let e = instant.elapsed();
+        data_read_count += 1;
         data_read_time += e;
 
         while base + 1 < self.len() {
