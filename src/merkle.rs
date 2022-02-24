@@ -103,6 +103,7 @@ impl IOFileReadStat {
 
 #[derive(Debug)]
 pub struct IOReadStat {
+    pub sum: std::time::Duration,
     pub cache_file_stat: IOFileReadStat,
     pub data_file_stat: IOFileReadStat,
 }
@@ -112,6 +113,7 @@ impl IOReadStat {
         IOReadStat {
             cache_file_stat: IOFileReadStat::new(cache_file_tag),
             data_file_stat: IOFileReadStat::new(data_file_tag),
+            sum: std::time::Duration::new(0, 0),
         }
     }
 }
