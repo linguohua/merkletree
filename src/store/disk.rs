@@ -473,6 +473,164 @@ impl<E: Element> Store<E> for DiskStore<E> {
         // Return the root
         self.last()
     }
+
+    // DiskStore specific merkle-tree build.
+    fn build2<A: Algorithm<E>, U: Unsigned>(
+        &mut self,
+        leafs: usize,
+        row_count: usize,
+        _config: Option<StoreConfig>,
+        buf1: &mut [u8],
+        buf2: &mut [u8],
+    ) -> Result<E> {
+        let branches = U::to_usize();
+        ensure!(
+            next_pow2(branches) == branches,
+            "branches MUST be a power of 2"
+        );
+        ensure!(Store::len(self) == leafs, "Inconsistent data");
+        ensure!(leafs % 2 == 0, "Leafs must be a power of two");
+
+        // Process one `level` at a time of `width` nodes. Each level has half the nodes
+        // as the previous one; the first level, completely stored in `data`, has `leafs`
+        // nodes. We guarantee an even number of nodes per `level`, duplicating the last
+        // node if necessary.
+        let mut level: usize = 0;
+        let mut width = leafs;
+        let mut level_node_index = 0;
+
+        let shift = log2_pow2(branches);
+
+        let mut bufa = buf1;
+        let mut bufb = buf2;
+        while width > 1 {
+            // Start reading at the beginning of the current level, and writing the next
+            // level immediate after.  `level_node_index` keeps track of the current read
+            // starts, and width is updated accordingly at each level so that we know where
+            // to start writing.
+            let (read_start, write_start) = if level == 0 {
+                // Note that we previously asserted that data.len() == leafs.
+                (0, Store::len(self))
+            } else {
+                (level_node_index, level_node_index + width)
+            };
+
+            self.process_layer2::<A, U>(width, level, read_start, write_start, bufa, bufb)?;
+
+            level_node_index += width;
+            level += 1;
+            width >>= shift; // width /= branches;
+
+            // When the layer is complete, update the store length
+            // since we know the backing file was updated outside of
+            // the store interface.
+            self.set_len(Store::len(self) + width);
+            self.copy_from_slice(&bufb[0..width* E::byte_len()], write_start)?;
+
+            // swap buf1 buf2
+            std::mem::swap(&mut bufa, &mut bufb);
+        }
+
+        // Ensure every element is accounted for.
+        ensure!(
+            Store::len(self) == get_merkle_tree_len(leafs, branches)?,
+            "Invalid merkle tree length"
+        );
+
+        ensure!(row_count == level + 1, "Invalid tree row_count");
+        // The root isn't part of the previous loop so `row_count` is
+        // missing one level.
+
+        // sync
+        self.sync()?;
+
+        // Return the root
+        self.last()
+    }
+
+    #[allow(unsafe_code)]
+    fn process_layer2<A: Algorithm<E>, U: Unsigned>(
+        &mut self,
+        width: usize,
+        level: usize,
+        _read_start: usize,
+        _write_start: usize,
+        buf1: &mut [u8],
+        buf2: &mut [u8]
+    ) -> Result<()> {
+        // Safety: this operation is safe becase it's a limited
+        // writable region on the backing store managed by this type.
+        // let mut mmap = unsafe {
+        //     let mut mmap_options = MmapOptions::new();
+        //     mmap_options
+        //         .offset((write_start * E::byte_len()) as u64)
+        //         .len(width * E::byte_len())
+        //         .map_mut(&self.file)
+        // }?;
+
+        //let data_lock = Arc::new(RwLock::new(self));
+        let branches = U::to_usize();
+        let shift = log2_pow2(branches);
+        // let write_chunk_width = (BUILD_CHUNK_NODES >> shift) * E::byte_len();
+
+        // ensure!(BUILD_CHUNK_NODES % branches == 0, "Invalid chunk size");
+        // Vec::from_iter((read_start..read_start + width).step_by(BUILD_CHUNK_NODES))
+        //     .into_par_iter()
+        //     .zip(mmap.par_chunks_mut(write_chunk_width))
+        //     .try_for_each(|(chunk_index, write_mmap)| -> Result<()> {
+        //         let chunk_size = std::cmp::min(BUILD_CHUNK_NODES, read_start + width - chunk_index);
+
+        //         let chunk_nodes = {
+        //             // Read everything taking the lock once.
+        //             data_lock
+        //                 .read()
+        //                 .unwrap()
+        //                 .read_range(chunk_index..chunk_index + chunk_size)?
+        //         };
+
+        //         let nodes_size = (chunk_nodes.len() / branches) * E::byte_len();
+        //         let hashed_nodes_as_bytes = chunk_nodes.chunks(branches).fold(
+        //             Vec::with_capacity(nodes_size),
+        //             |mut acc, nodes| {
+        //                 let h = A::default().multi_node(&nodes, level);
+        //                 acc.extend_from_slice(h.as_ref());
+        //                 acc
+        //             },
+        //         );
+
+        //         // Check that we correctly pre-allocated the space.
+        //         let hashed_nodes_as_bytes_len = hashed_nodes_as_bytes.len();
+        //         ensure!(
+        //             hashed_nodes_as_bytes.len() == chunk_size / branches * E::byte_len(),
+        //             "Invalid hashed node length"
+        //         );
+
+        //         write_mmap[0..hashed_nodes_as_bytes_len].copy_from_slice(&hashed_nodes_as_bytes);
+
+        //         Ok(())
+        //     });
+
+
+        // always start from zero in buf1
+        // write to buf2
+        let item_size = E::byte_len();
+        for i in (0..width).step_by(branches) {
+            let mut nodes = Vec::with_capacity(branches);
+            for j in 0..branches {
+                // read node
+                let offset = (i + j) * item_size;
+                let e = E::from_slice(&buf1[offset..offset+item_size]);
+                nodes.push(e);
+            }
+
+            let h = A::default().multi_node(&nodes[..], level);
+
+            let offset = (i >> shift) * item_size;
+            buf2[offset..offset+item_size].copy_from_slice(h.as_ref());
+        }
+
+        Ok(())
+    }
 }
 
 impl<E: Element> DiskStore<E> {
