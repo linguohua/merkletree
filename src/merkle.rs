@@ -1072,7 +1072,7 @@ impl<
 
         // Generate the proof that will validate to the provided
         // sub-tree root (note the branching factor of B).
-        let sub_tree_proof = tree.gen_cached_proof(leaf_index, rows_to_discard, iostat)?;
+        let sub_tree_proof = tree.gen_cached_proof2(leaf_index, rows_to_discard, iostat)?;
 
         // Construct the top layer proof.  'lemma' length is
         // top_layer_nodes - 1 + root == top_layer_nodes
@@ -1123,7 +1123,7 @@ impl<
 
         // Generate the proof that will validate to the provided
         // sub-tree root (note the branching factor of B).
-        let sub_tree_proof = tree.gen_cached_proof(leaf_index, rows_to_discard, iostat)?;
+        let sub_tree_proof = tree.gen_cached_proof2(leaf_index, rows_to_discard, iostat)?;
 
         // Construct the top layer proof.  'lemma' length is
         // top_layer_nodes - 1 + root == top_layer_nodes
@@ -1144,6 +1144,15 @@ impl<
         Proof::new::<TopTreeArity, SubTreeArity>(Some(Box::new(sub_tree_proof)), lemma, path)
     }
 
+    pub fn gen_cached_proof(
+        &self,
+        i: usize,
+        rows_to_discard: Option<usize>,
+    ) -> Result<Proof<E, BaseTreeArity>> {
+
+        return self.gen_cached_proof2(i, rows_to_discard, None); 
+    }
+
     /// Generate merkle tree inclusion proof for leaf `i` by first
     /// building a partial tree (returned) along with the proof.
     /// 'rows_to_discard' is an option that will be used if set (even
@@ -1153,7 +1162,7 @@ impl<
     /// Return value is a Result tuple of the proof and the partial
     /// tree that was constructed.
     #[allow(clippy::type_complexity)]
-    pub fn gen_cached_proof(
+    pub fn gen_cached_proof2(
         &self,
         i: usize,
         rows_to_discard: Option<usize>,
