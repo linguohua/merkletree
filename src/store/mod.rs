@@ -420,6 +420,29 @@ pub trait Store<E: Element>: std::fmt::Debug + Send + Sync + Sized {
         // Return the root
         self.last()
     }
+
+    fn build2<A: Algorithm<E>, U: Unsigned>(
+        &mut self,
+        _leafs: usize,
+        _row_count: usize,
+        _config: Option<StoreConfig>,
+        _buf1: &mut[u8],
+        _buf2: &mut[u8]
+    ) -> Result<E> {
+        Err(anyhow!("not implement"))
+    }
+
+    fn process_layer2<A: Algorithm<E>, U: Unsigned>(
+        &mut self,
+        _width: usize,
+        _level: usize,
+        _read_start: usize,
+        _write_start: usize,
+        _buf1: &mut [u8],
+        _buf2: &mut [u8]
+    ) -> Result<()> {
+        Err(anyhow!("not implement"))
+    }
 }
 
 // Using a macro as it is not possible to do a generic implementation for all stores.
